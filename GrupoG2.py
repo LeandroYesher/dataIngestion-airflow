@@ -61,7 +61,7 @@ buscar_agregados_do_polygon_task = PythonOperator(
 buscar_e_parsear_task = PythonOperator(
     task_id='buscar_e_parsear',
     python_callable=buscar_e_parsear,
-    op_kwargs={'url': 'ANALISE'},
+    op_kwargs={'url': 'https://api.polygon.io/v1/indicators/sma/AAPL?ticker=AAPL&timespan=minute&adjusted=true&window=50&series_type=close&order=desc&limit=10&apiKey=_KFg8zNJe0VmUaYWmKvek8gBErKs22Y1'},
     dag=dag,
 )
 
