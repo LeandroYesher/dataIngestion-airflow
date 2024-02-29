@@ -1,53 +1,47 @@
 from airflow import DAG
+from airflow.models import Variable
 from airflow.operators.python_operator import PythonOperator
-from datetime import datetime
+from datetime import datetime, timedelta
 from polygon import RESTClient
-import requests
-import json
 import pandas as pd
 
-apiKeyStr = '_KFg8zNJe0VmUaYWmKvek8gBErKs22Y1'
-client = RESTClient(api_key=apiKeyStr)
+polygonApiKey = Variable.get("POLYGON_API_KEY")
+client = RESTClient(api_key=polygonApiKey)
 
-def buscar_agregados_do_polygon():
-    
-    aggs = client.get_aggs(
-        ticker="AAPL",
+def buscar_agregados_do_polygon(ticker):
+    data_ontem = datetime.now() - timedelta(days=1)
+    data_ontem_formatada = data_ontem.strftime("%Y-%m-%d")
+
+    dados = client.get_aggs(
+        ticker=ticker,
         multiplier=1,
         timespan="day",
-        from_="2022-04-04",
-        to="2023-04-04"
+        from_="2023-04-04",
+        to=data_ontem_formatada
     )
-    aggs_df = pd.DataFrame(aggs)
-    aggs_df['data'] = pd.to_datetime(aggs_df.timestamp, unit='ms')
-    return aggs_df
+    df = pd.DataFrame(dados)
+    df['data'] = pd.to_datetime(df.timestamp, unit='ms')
+    return df
 
-def buscar_e_parsear(url):
+def salvar_dataframe(task_instance):
+
+    df = task_instance.xcom_pull(task_ids='buscar_agregados_do_polygon')
+    projeto_id = Variable.get("PROJETO_ID")
+    dataset_id = Variable.get("DATASET_ID")
+    nome_tabela = Variable.get("NOME_TABELA")
+
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raises HTTPError for bad responses
-        data = json.loads(response.text).data
-        df = pd.DataFrame(data)
-        df['data'] = pd.to_datetime(df.timestamp, unit='ms')
-        return df
+        df.to_gbq(
+            f"{projeto_id}.{dataset_id}.{nome_tabela}", 
+            project_id = projeto_id, 
+            if_exists="append",
+            auth_local_webserver=False
+        )
+        print("DataFrame enviado com sucesso")
     except Exception as e:
-        print(f"Erro ao buscar e parsear dados: {e}")
-        return pd.DataFrame()
+        print(f"Erro ao enviar o DataFrame: {str(e)}")
 
-def calcular_sma(ticker):
-    try:
-        url = f'https://api.polygon.io/v1/indicators/sma/{ticker}?timespan=minute&adjusted=true&window=50&series_type=close&order=desc&limit=10&apiKey={apiKeyStr}'
-        response = requests.get(url)
-        response.raise_for_status()  # Raises HTTPError for bad responses
-        data = json.loads(response.text)['results']['values']
-        df = pd.DataFrame(data)
-        df['data'] = pd.to_datetime(df.timestamp, unit='ms')
-        return df
-    except Exception as e:
-        print(f"Erro ao calcular SMA: {e}")
-        return pd.DataFrame()
-
-default_args = {
+args_padrao = {
     'owner': 'Grupo G2',
     'depends_on_past': False,
     'start_date': datetime(2022, 4, 4),
@@ -57,28 +51,23 @@ default_args = {
 }
 
 with DAG(
-    'Grupo_G2',
-    default_args=default_args,
+    'GrupoG2',
+    default_args=args_padrao,
     description='Um DAG para buscar e processar dados do Polygon',
     schedule_interval='@daily',
-    catchup=False
-) as dag:
+    catchup=False) as dag:
 
     buscar_agregados_do_polygon_task = PythonOperator(
         task_id='buscar_agregados_do_polygon',
         python_callable=buscar_agregados_do_polygon,
+        op_kwargs={"ticker": "AAPL"},
+        dag=dag,
     )
 
-    buscar_e_parsear_task = PythonOperator(
-        task_id='buscar_e_parsear',
-        python_callable=buscar_e_parsear,
-        op_kwargs={'url': f'https://api.polygon.io/v1/indicators/sma/AAPL?ticker=AAPL&timespan=minute&adjusted=true&window=50&series_type=close&order=desc&limit=10&apiKey={apiKeyStr}'},
+    salvar_dataframe_task = PythonOperator(
+        task_id="salvar_dataframe",
+        python_callable=salvar_dataframe,
+        dag=dag,
     )
 
-    calcular_sma_task = PythonOperator(
-        task_id='calcular_sma',
-        python_callable=calcular_sma,
-        op_kwargs={'ticker': 'AAPL'},
-    )
-
-buscar_agregados_do_polygon_task >> buscar_e_parsear_task >> calcular_sma_task
+buscar_agregados_do_polygon_task >> salvar_dataframe_task
