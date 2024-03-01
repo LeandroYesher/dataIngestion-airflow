@@ -34,7 +34,7 @@ def salvar_dataframe(task_instance):
         df.to_gbq(
             f"{projeto_id}.{dataset_id}.{nome_tabela}", 
             project_id = projeto_id, 
-            if_exists="append",
+            if_exists="replace",
             auth_local_webserver=False
         )
         print("DataFrame enviado com sucesso")
